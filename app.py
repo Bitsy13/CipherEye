@@ -1,8 +1,9 @@
 import os
 import re
 import tempfile
-import subprocess
+import shutil
 from flask import Flask, render_template, request
+from git import Repo
 
 app = Flask(__name__)
 
@@ -51,19 +52,28 @@ def index():
     scanned_target = None
     
     if request.method == "POST":
-        github_url = request.form.get("github_url").strip()
+        github_url = request.form.get("github_url")
+        if github_url:
+            github_url = github_url.strip()
+            
         uploaded_files = request.files.getlist("files")
         
         # Option A: User submitted a GitHub URL
         if github_url:
             scanned_target = github_url
-            temp_dir = tempfile.mkdtemp()
+            target_dir = os.path.join(tempfile.gettempdir(), "cloned_repo")
+            
             try:
-                subprocess.run(["git", "clone", github_url, temp_dir], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                files_count, leaks = scan_directory(temp_dir)
+                if os.path.exists(target_dir):
+                    shutil.rmtree(target_dir)
+                
+                # Clone safely using GitPython (works smoothly on Render)
+                Repo.clone_from(github_url, target_dir)
+                
+                files_count, leaks = scan_directory(target_dir)
                 results = {"files_scanned": files_count, "leaks": leaks}
             except Exception as e:
-                results = {"error": "Failed to clone repository. Check the URL or ensure Git is installed."}
+                results = {"error": "Failed to clone repository. Check the URL or ensure permissions are correct."}
                 
         # Option B: User uploaded files directly
         elif uploaded_files and uploaded_files[0].filename != '':
@@ -81,9 +91,8 @@ def index():
                 
             results = {"files_scanned": files_count, "leaks": all_leaks}
             
-    return render_template("index.html", results=results, target=scanned_target)
+    return render_template("index.html", results=results, scanned_target=scanned_target)
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
-    
